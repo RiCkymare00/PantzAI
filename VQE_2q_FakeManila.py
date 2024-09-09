@@ -19,12 +19,24 @@ from gym import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from gym import Env, spaces
+from qiskit import IBMQ
 import copy
 import time
 from scipy.optimize import minimize, LinearConstraint
 from qiskit.algorithms.optimizers import SPSA, SLSQP, COBYLA
 from qiskit.algorithms.minimum_eigensolvers import NumPyMinimumEigensolver
 from qiskit_aer.primitives import Estimator
+import shutil
+import os
+from stable_baselines3.common.callbacks import BaseCallback
+from qiskit_nature.units import DistanceUnit
+from qiskit_nature.second_q.drivers import PySCFDriver
+from qiskit_nature.second_q.mappers import JordanWignerMapper, ParityMapper
+import numpy as np
+from qiskit_nature.second_q.formats.molecule_info import MoleculeInfo
+from qiskit_nature.second_q.drivers import PySCFDriver
+from qiskit.providers.ibmq import IBMQBackend
+from qiskit_ibm_provider import IBMProvider
 
 gate_backend =FakeManila()
 gate_backend.configuration().hamiltonian['qub'] = {'0': 2,'1': 2,'2': 2,'3': 2,'4': 2}
@@ -35,17 +47,26 @@ pulse_backend = DynamicsBackend.from_backend(gate_backend, evaluation_mode="spar
 solver_options = {"method": "jax_odeint", "atol": 1e-6, "rtol": 1e-8}
 pulse_backend.set_options(solver_options=solver_options)
 pulse_backend.configuration = lambda: gate_backend.configuration()
-print("Porte logiche supportate dal backend ibm_nazca:", gate_backend.configuration().basis_gates)
+print("Porte logiche supportate dal backend FakeManila:", gate_backend.configuration().basis_gates)
 
 settings.use_pauli_sum_op = False
 
 my_dict = {}
 
+class TimestepLoggerCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super(TimestepLoggerCallback, self).__init__(verbose)
+
+    def _on_step(self) -> bool:
+        # Qui `self.num_timesteps` ti dà il numero di timesteps completati
+        print(f"Timestep: {self.num_timesteps}")
+        return True
+
 class QuantumEnv(Env):
     def __init__(self):
         super(QuantumEnv,self).__init__()
         self.available_gates = ['x', 'cx']
-        self.ansatz = ['x','cx']
+        self.ansatz = []
         self.max_gates = 10
         #spazio delle azioni
         self.action_space = spaces.Discrete(2 * len(self.available_gates))
@@ -53,7 +74,7 @@ class QuantumEnv(Env):
         self.observation_space = spaces.MultiDiscrete([len(self.available_gates) + 1] * self.max_gates)
 
     def reset(self):
-        self.ansatz = ['x','cx'] 
+        self.ansatz = [] 
         return self._get_obs()
 
     def _get_obs(self):
@@ -89,17 +110,28 @@ class QuantumEnv(Env):
         #print('Distanza:', dist)
         print('Ansatz:', self.ansatz)
         vqe_res = minimize(vqe, params, args=(my_dict, pulse_backend, gate_backend, n_qubit, n_shot, self.ansatz),
-                           method=optimizer, constraints=LC, options={'rhobeg':0.1, 'maxiter':50})
+                           method=optimizer, constraints=LC, options={'rhobeg':0.1, 'maxiter':10})
         
         # Calcola la ricompensa
         reward = - (vqe_res.fun + REPULSION_ENERGYproblem)
-    
+        print('reward: ',reward)
+
         # Verifica se l'ambiente è terminato (massimo numero di gate)
         done = len(self.ansatz) >= self.max_gates
-    
+
+
+        #print('pulse_VQE:',vqe_res.fun + REPULSION_ENERGYproblem)
+        dump_dir = '/tmp/foo'
+        # Controlla se la directory esiste e poi la elimina con tutto il suo contenuto
+        if os.path.exists(dump_dir):
+            try:
+                shutil.rmtree(dump_dir)
+                print(f"Directory {dump_dir} eliminata con successo.")
+            except Exception as e:
+                print(f"Errore durante l'eliminazione della directory {dump_dir}: {e}")
+        
         # Restituisci osservazione, ricompensa, stato finito e informazioni aggiuntive
         return self._get_obs(), reward, done, {}
-
 
     def HE_pulse(backend, amp, angle, width, ansatz):
         with pulse.build(backend) as my_program1:
@@ -307,7 +339,7 @@ def vqe_one(prepulse,n_qubit,n_shot,pulse_backend, backend,key,value):
     return value*run_pulse_sim(meas_pulse, key, pulse_backend, backend, n_shot)
 
 def vqe(params,pauli_dict,pulse_backend, backend,n_qubit,n_shot, ansatz):
-    print("params in def chemistry in vqe.py: ", params)
+    #print("params in def chemistry in vqe.py: ", params)
     # assert(len(params)%2==0)
     width_len = int(len(params)-1*(n_qubit-1))
     split_ind = int(width_len/3)
@@ -329,7 +361,7 @@ def vqe(params,pauli_dict,pulse_backend, backend,n_qubit,n_shot, ansatz):
         prepulse = QuantumEnv.HE_pulse(backend, amp, angle, width, ansatz)
         expect = vqe_one(prepulse, n_qubit, n_shot, pulse_backend, backend, key, value)
         expect_values.append(expect)
-    print("E for cur_iter: ",sum(expect_values))
+    #print("E for cur_iter: ",sum(expect_values))
     return sum(expect_values)
     
     
@@ -337,5 +369,5 @@ env = DummyVecEnv([lambda: QuantumEnv()])
 # Agente RL
 model = PPO("MlpPolicy", env, verbose=1)
 print("Inizio dell'apprendimento...")
-model.learn(total_timesteps=10000)
+model.learn(total_timesteps=30, callback=TimestepLoggerCallback())
 print("Apprendimento completato.")
