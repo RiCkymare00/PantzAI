@@ -37,6 +37,7 @@ from qiskit_nature.second_q.formats.molecule_info import MoleculeInfo
 from qiskit_nature.second_q.drivers import PySCFDriver
 from qiskit.providers.ibmq import IBMQBackend
 from qiskit_ibm_provider import IBMProvider
+import matplotlib.pyplot as plt
 
 gate_backend =FakeManila()
 gate_backend.configuration().hamiltonian['qub'] = {'0': 2,'1': 2,'2': 2,'3': 2,'4': 2}
@@ -53,13 +54,22 @@ settings.use_pauli_sum_op = False
 
 my_dict = {}
 
-class TimestepLoggerCallback(BaseCallback):
-    def __init__(self, verbose=0):
-        super(TimestepLoggerCallback, self).__init__(verbose)
+class MyCustomCallback(BaseCallback):
+    def __init__(self, max_timesteps, verbose=0):
+        super(MyCustomCallback, self).__init__(verbose)
+        self.max_timesteps = max_timesteps
+        self.current_timesteps = 0
+        self.rewards = []
+        self.timesteps = []
 
     def _on_step(self) -> bool:
-        # Qui `self.num_timesteps` ti dà il numero di timesteps completati
-        print(f"Timestep: {self.num_timesteps}")
+        self.current_timesteps += 1
+        self.rewards.append(self.locals['rewards'])
+        self.timesteps.append(self.num_timesteps)
+        print(f"Current timestep: {self.current_timesteps}")
+        if self.current_timesteps >= self.max_timesteps:
+            print(f"Max timesteps reached ({self.max_timesteps}). Stopping training.")
+            return False  # Restituisce False per fermare il training
         return True
 
 class QuantumEnv(Env):
@@ -67,11 +77,12 @@ class QuantumEnv(Env):
         super(QuantumEnv,self).__init__()
         self.available_gates = ['x', 'cx']
         self.ansatz = []
-        self.max_gates = 10
+        self.max_gates = 5
         #spazio delle azioni
         self.action_space = spaces.Discrete(2 * len(self.available_gates))
         #spazio degli stati
         self.observation_space = spaces.MultiDiscrete([len(self.available_gates) + 1] * self.max_gates)
+        self.actions = []
 
     def reset(self):
         self.ansatz = [] 
@@ -86,7 +97,8 @@ class QuantumEnv(Env):
         return np.array(obs, dtype=np.int32)
 
     def step(self, action):
-        # Aggiungi o rimuovi un gate in base all'azione
+        info = {}
+        self.actions.append(action)
         if action < len(self.available_gates):  # Aggiungi un gate
             if len(self.ansatz) < self.max_gates:
                 self.ansatz.append(self.available_gates[action])
@@ -110,10 +122,10 @@ class QuantumEnv(Env):
         #print('Distanza:', dist)
         print('Ansatz:', self.ansatz)
         vqe_res = minimize(vqe, params, args=(my_dict, pulse_backend, gate_backend, n_qubit, n_shot, self.ansatz),
-                           method=optimizer, constraints=LC, options={'rhobeg':0.1, 'maxiter':10})
+                           method=optimizer, constraints=LC, options={'rhobeg':0.2, 'maxiter':15})
         
         # Calcola la ricompensa
-        reward = - (vqe_res.fun + REPULSION_ENERGYproblem)
+        reward = np.log((-(vqe_res.fun + REPULSION_ENERGYproblem))**2)
         print('reward: ',reward)
 
         # Verifica se l'ambiente è terminato (massimo numero di gate)
@@ -131,7 +143,7 @@ class QuantumEnv(Env):
                 print(f"Errore durante l'eliminazione della directory {dump_dir}: {e}")
         
         # Restituisci osservazione, ricompensa, stato finito e informazioni aggiuntive
-        return self._get_obs(), reward, done, {}
+        return self._get_obs(), reward, done, info
 
     def HE_pulse(backend, amp, angle, width, ansatz):
         with pulse.build(backend) as my_program1:
@@ -364,10 +376,20 @@ def vqe(params,pauli_dict,pulse_backend, backend,n_qubit,n_shot, ansatz):
     #print("E for cur_iter: ",sum(expect_values))
     return sum(expect_values)
     
-    
+max_timesteps = 30
+callback = MyCustomCallback(max_timesteps=max_timesteps)
 env = DummyVecEnv([lambda: QuantumEnv()])
 # Agente RL
 model = PPO("MlpPolicy", env, verbose=1)
 print("Inizio dell'apprendimento...")
-model.learn(total_timesteps=30, callback=TimestepLoggerCallback())
+model.learn(total_timesteps=5, callback=callback)
 print("Apprendimento completato.")
+
+plt.plot(callback.timesteps, callback.rewards, marker = "o", linewidth = 1.0, label = "curva di apprendimento")
+plt.xlabel("timesteps")
+plt.ylabel("rewards")
+plt.legend()
+plt.title("Curva di apprendimento")
+output_path = 'apprend.png'
+plt.savefig(output_path)
+

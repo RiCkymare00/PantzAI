@@ -19,6 +19,7 @@ from gym import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from gym import Env, spaces
+from qiskit import IBMQ
 import copy
 import time
 from scipy.optimize import minimize, LinearConstraint
@@ -36,8 +37,9 @@ from qiskit_nature.second_q.formats.molecule_info import MoleculeInfo
 from qiskit_nature.second_q.drivers import PySCFDriver
 from qiskit.providers.ibmq import IBMQBackend
 from qiskit_ibm_provider import IBMProvider
+import matplotlib.pyplot as plt
 
-'''gate_backend =FakeManila()
+gate_backend =FakeManila()
 gate_backend.configuration().hamiltonian['qub'] = {'0': 2,'1': 2,'2': 2,'3': 2,'4': 2}
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_platform_name", "cpu")
@@ -46,32 +48,28 @@ pulse_backend = DynamicsBackend.from_backend(gate_backend, evaluation_mode="spar
 solver_options = {"method": "jax_odeint", "atol": 1e-6, "rtol": 1e-8}
 pulse_backend.set_options(solver_options=solver_options)
 pulse_backend.configuration = lambda: gate_backend.configuration()
-print("Porte logiche supportate dal backend FakeManila:", gate_backend.configuration().basis_gates)'''
-
-IBMQ.save_account(token = 'token',overwrite=True)
-IBMQ.load_account()
-
-provider = IBMQ.get_provider(hub='ibm-q', group='open', project='main')
-available_backends = provider.backends()
-print("Backends disponibili:")
-for backend in available_backends:
-    print(backend.name())
-gate_backend = provider.get_backend('ibm_osaka')
-pulse_backend = provider.get_backend('ibm_osaka')
-print("Porte logiche supportate dal backend ibm_osaka:", gate_backend.configuration().basis_gates)
-#gate_backend.qubit_properties(0)
+print("Porte logiche supportate dal backend FakeManila:", gate_backend.configuration().basis_gates)
 
 settings.use_pauli_sum_op = False
 
 my_dict = {}
 
-class TimestepLoggerCallback(BaseCallback):
-    def __init__(self, verbose=0):
-        super(TimestepLoggerCallback, self).__init__(verbose)
+class MyCustomCallback(BaseCallback):
+    def __init__(self, max_timesteps, verbose=0):
+        super(MyCustomCallback, self).__init__(verbose)
+        self.max_timesteps = max_timesteps
+        self.current_timesteps = 0
+        self.rewards = []
+        self.timesteps = []
 
     def _on_step(self) -> bool:
-        # Qui `self.num_timesteps` ti dà il numero di timesteps completati
-        print(f"Timestep: {self.num_timesteps}")
+        self.current_timesteps += 1
+        self.rewards.append(self.locals['rewards'])
+        self.timesteps.append(self.num_timesteps)
+        print(f"Current timestep: {self.current_timesteps}")
+        if self.current_timesteps >= self.max_timesteps:
+            print(f"Max timesteps reached ({self.max_timesteps}). Stopping training.")
+            return False  # Restituisce False per fermare il training
         return True
 
 class QuantumEnv(Env):
@@ -84,6 +82,7 @@ class QuantumEnv(Env):
         self.action_space = spaces.Discrete(2 * len(self.available_gates))
         #spazio degli stati
         self.observation_space = spaces.MultiDiscrete([len(self.available_gates) + 1] * self.max_gates)
+        self.actions = []
 
     def reset(self):
         self.ansatz = [] 
@@ -98,7 +97,8 @@ class QuantumEnv(Env):
         return np.array(obs, dtype=np.int32)
 
     def step(self, action):
-        # Aggiungi o rimuovi un gate in base all'azione
+        info = {}
+        self.actions.append(action)
         if action < len(self.available_gates):  # Aggiungi un gate
             if len(self.ansatz) < self.max_gates:
                 self.ansatz.append(self.available_gates[action])
@@ -122,10 +122,10 @@ class QuantumEnv(Env):
         #print('Distanza:', dist)
         print('Ansatz:', self.ansatz)
         vqe_res = minimize(vqe, params, args=(my_dict, pulse_backend, gate_backend, n_qubit, n_shot, self.ansatz),
-                           method=optimizer, constraints=LC, options={'rhobeg':0.1, 'maxiter':50})
+                           method=optimizer, constraints=LC, options={'rhobeg':0.1, 'maxiter':0})
         
         # Calcola la ricompensa
-        reward = - (vqe_res.fun + REPULSION_ENERGYproblem)
+        reward = np.log((-(vqe_res.fun + REPULSION_ENERGYproblem))**2)
         print('reward: ',reward)
 
         # Verifica se l'ambiente è terminato (massimo numero di gate)
@@ -143,7 +143,7 @@ class QuantumEnv(Env):
                 print(f"Errore durante l'eliminazione della directory {dump_dir}: {e}")
         
         # Restituisci osservazione, ricompensa, stato finito e informazioni aggiuntive
-        return self._get_obs(), reward, done, {}
+        return self._get_obs(), reward, done, info
 
     def HE_pulse(backend, amp, angle, width, ansatz):
         with pulse.build(backend) as my_program1:
@@ -376,10 +376,21 @@ def vqe(params,pauli_dict,pulse_backend, backend,n_qubit,n_shot, ansatz):
     #print("E for cur_iter: ",sum(expect_values))
     return sum(expect_values)
     
-    
+max_timesteps = 5
+callback = MyCustomCallback(max_timesteps=max_timesteps)
 env = DummyVecEnv([lambda: QuantumEnv()])
 # Agente RL
 model = PPO("MlpPolicy", env, verbose=1)
 print("Inizio dell'apprendimento...")
-model.learn(total_timesteps=10000, callback=TimestepLoggerCallback())
+model.learn(total_timesteps=5, callback=callback)
 print("Apprendimento completato.")
+
+plt.plot(callback.timesteps, callback.rewards, marker = "o", linewidth = 1.0, label = "curva di apprendimento")
+plt.xlabel("timesteps")
+plt.ylabel("rewards")
+plt.legend()
+plt.title("Curva di apprendimento")
+output_path = 'apprend.png'
+plt.savefig(output_path)
+plt.show()
+
