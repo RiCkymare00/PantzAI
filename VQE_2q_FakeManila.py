@@ -9,16 +9,15 @@ from qiskit_nature.second_q.drivers import PySCFDriver
 from qiskit_nature.second_q.mappers import JordanWignerMapper, ParityMapper
 import numpy as np
 from qiskit_nature.second_q.formats.molecule_info import MoleculeInfo
-from qiskit_nature.second_q.drivers import PySCFDriver
 from qiskit_nature import settings
-from qiskit_nature.second_q.transformers import FreezeCoreTransformer,ActiveSpaceTransformer
+from qiskit_nature.second_q.transformers import FreezeCoreTransformer, ActiveSpaceTransformer
 import re
 from qiskit.pulse import Schedule, GaussianSquare, Drag, Delay, Play, ControlChannel, DriveChannel
 import gym
 from gym import spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
-from gym import Env, spaces
+from gym import Env
 from qiskit import IBMQ
 import copy
 import time
@@ -29,15 +28,10 @@ from qiskit_aer.primitives import Estimator
 import shutil
 import os
 from stable_baselines3.common.callbacks import BaseCallback
-from qiskit_nature.units import DistanceUnit
-from qiskit_nature.second_q.drivers import PySCFDriver
-from qiskit_nature.second_q.mappers import JordanWignerMapper, ParityMapper
-import numpy as np
-from qiskit_nature.second_q.formats.molecule_info import MoleculeInfo
-from qiskit_nature.second_q.drivers import PySCFDriver
 from qiskit.providers.ibmq import IBMQBackend
 from qiskit_ibm_provider import IBMProvider
 import matplotlib.pyplot as plt
+from stable_baselines3.common.evaluation import evaluate_policy
 
 gate_backend =FakeManila()
 gate_backend.configuration().hamiltonian['qub'] = {'0': 2,'1': 2,'2': 2,'3': 2,'4': 2}
@@ -122,7 +116,7 @@ class QuantumEnv(Env):
         #print('Distanza:', dist)
         print('Ansatz:', self.ansatz)
         vqe_res = minimize(vqe, params, args=(my_dict, pulse_backend, gate_backend, n_qubit, n_shot, self.ansatz),
-                           method=optimizer, constraints=LC, options={'rhobeg':0.2, 'maxiter':15})
+                           method=optimizer, constraints=LC, options={'rhobeg':0.2, 'maxiter':10})
         
         # Calcola la ricompensa
         reward = np.log((-(vqe_res.fun + REPULSION_ENERGYproblem))**2)
@@ -376,7 +370,7 @@ def vqe(params,pauli_dict,pulse_backend, backend,n_qubit,n_shot, ansatz):
     #print("E for cur_iter: ",sum(expect_values))
     return sum(expect_values)
     
-max_timesteps = 30
+max_timesteps = 20
 callback = MyCustomCallback(max_timesteps=max_timesteps)
 env = DummyVecEnv([lambda: QuantumEnv()])
 # Agente RL
@@ -393,3 +387,22 @@ plt.title("Curva di apprendimento")
 output_path = 'apprend.png'
 plt.savefig(output_path)
 
+episodes = 5
+for episode in range(1, episodes+1):
+    print('EPISODIO:',episode)
+    state = env.reset()
+    done = False
+    score = 0
+    while not done:
+        env.render()
+        action, _ = model.predict(state)
+        n_state, reward, done,_= env.step(action)
+        print('stato:',n_state)
+        state = n_state
+        score += reward
+
+        if done:
+            break
+    print(f'Episode:{episode} Score:{score}')
+
+env.close()
