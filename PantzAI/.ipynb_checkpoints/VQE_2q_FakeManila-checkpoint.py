@@ -27,21 +27,25 @@ from qiskit.algorithms.minimum_eigensolvers import NumPyMinimumEigensolver
 from qiskit_aer.primitives import Estimator
 import shutil
 import os
+import os
+os.environ['JAX_JIT_PJIT_API_MERGE'] = '0'
 from stable_baselines3.common.callbacks import BaseCallback
 from qiskit.providers.ibmq import IBMQBackend
 from qiskit_ibm_provider import IBMProvider
 import matplotlib.pyplot as plt
 from stable_baselines3.common.evaluation import evaluate_policy
+import gc
 
 gate_backend =FakeManila()
 gate_backend.configuration().hamiltonian['qub'] = {'0': 2,'1': 2,'2': 2,'3': 2,'4': 2}
-jax.config.update("jax_enable_x64", True)
-jax.config.update("jax_platform_name", "cpu")
-Array.set_default_backend("jax")
+#jax.config.update("jax_enable_x64", True)
+#jax.config.update("jax_platform_name", "cpu")
+#Array.set_default_backend("jax")
 pulse_backend = DynamicsBackend.from_backend(gate_backend, evaluation_mode="sparse")
-solver_options = {"method": "jax_odeint", "atol": 1e-6, "rtol": 1e-8}
-pulse_backend.set_options(solver_options=solver_options)
+#solver_options = {"method": "jax_odeint", "atol": 1e-6, "rtol": 1e-8}
+#pulse_backend.set_options(solver_options=solver_options)
 pulse_backend.configuration = lambda: gate_backend.configuration()
+#print('jax.devices()',jax.devices())
 print("Porte logiche supportate dal backend FakeManila:", gate_backend.configuration().basis_gates)
 
 settings.use_pauli_sum_op = False
@@ -71,7 +75,7 @@ class QuantumEnv(Env):
         super(QuantumEnv,self).__init__()
         self.available_gates = ['x', 'cx']
         self.ansatz = []
-        self.max_gates = 5
+        self.max_gates = 10
         #spazio delle azioni
         self.action_space = spaces.Discrete(2 * len(self.available_gates))
         #spazio degli stati
@@ -90,6 +94,16 @@ class QuantumEnv(Env):
         obs += [len(self.available_gates)] * (self.max_gates - len(obs))
         return np.array(obs, dtype=np.int32)
 
+    def n_param(self,ansatz):
+        param = 0
+        i = 0
+        if not ansatz:
+            param = 7
+        for i in range(0,len(ansatz)):
+            if ansatz[i] == 'x' or ansatz[i] == 'cx':
+                param = param + 7
+        return param
+
     def step(self, action):
         info = {}
         self.actions.append(action)
@@ -100,11 +114,11 @@ class QuantumEnv(Env):
             gate_to_remove = self.available_gates[action - len(self.available_gates)]
             if gate_to_remove in self.ansatz:
                 self.ansatz.remove(gate_to_remove)
-    
+        
         # Esegui il VQE per calcolare l'energia
         dist = 0.735
         n_qubit = 2
-        parameters = 7
+        parameters = self.n_param(self.ansatz)
         LC = gen_LC_vqe(parameters)
         n_shot = 1024
         optimizer = 'COBYLA'
@@ -116,11 +130,12 @@ class QuantumEnv(Env):
         #print('Distanza:', dist)
         print('Ansatz:', self.ansatz)
         vqe_res = minimize(vqe, params, args=(my_dict, pulse_backend, gate_backend, n_qubit, n_shot, self.ansatz),
-                           method=optimizer, constraints=LC, options={'rhobeg':0.1, 'maxiter':20})
+                           method=optimizer, constraints=LC, options={'rhobeg':0.1, 'maxiter':50})
         
         # Calcola la ricompensa
-        reward = np.log((-(vqe_res.fun + REPULSION_ENERGYproblem))**2)
+        reward = 5+5*np.log((-(vqe_res.fun + REPULSION_ENERGYproblem))**2)
         print('reward: ',reward)
+        print('energy:', vqe_res.fun + REPULSION_ENERGYproblem)
 
         # Verifica se l'ambiente è terminato (massimo numero di gate)
         done = len(self.ansatz) >= self.max_gates
@@ -136,7 +151,7 @@ class QuantumEnv(Env):
             except Exception as e:
                 print(f"Errore durante l'eliminazione della directory {dump_dir}: {e}")
         
-        # Restituisci osservazione, ricompensa, stato finito e informazioni aggiuntive
+        #Restituisci osservazione, ricompensa, stato finito e informazioni aggiuntive
         return self._get_obs(), reward, done, info
 
     def HE_pulse(backend, amp, angle, width, ansatz):
@@ -229,7 +244,7 @@ def get_qubit_op(dist):
     
         # Somma i coefficienti complessi
         complex_coeff = sum(complex(real, imag) for real, imag in zip(real_coeffs, imag_coeffs))'''
-    
+
         # Aggiungi il coefficiente all'operatore nel dizionario
         #current_coeff = my_dict.get(operators_str, 0.0)
         #my_dict[operators_str] = coeffs_str
@@ -309,8 +324,9 @@ def expectation_value(counts,shots,key):
 def run_pulse_sim(meas_pulse, key, pulse_backend, backend, n_shot):
     # Misura il tempo di esecuzione della funzione run
     start_time_run = time.time()
-    job = pulse_backend.run(meas_pulse, shots=n_shot)
-    #job = backend.run(meas_pulse)
+    #job = pulse_backend.run(meas_pulse, shots=n_shot)
+    job = pulse_backend.run(meas_pulse)
+    #job = gate_backend.run(meas_pulse)
     run_time = time.time() - start_time_run
 
     # Monitora il job
@@ -345,10 +361,10 @@ def vqe_one(prepulse,n_qubit,n_shot,pulse_backend, backend,key,value):
     return value*run_pulse_sim(meas_pulse, key, pulse_backend, backend, n_shot)
 
 def vqe(params,pauli_dict,pulse_backend, backend,n_qubit,n_shot, ansatz):
-    #print("params in def chemistry in vqe.py: ", params)
+    print("params in def chemistry in vqe.py: ", params)
     # assert(len(params)%2==0)
     width_len = int(len(params)-1*(n_qubit-1))
-    split_ind = int(width_len/3)
+    split_ind = int(width_len/2)
     amp = np.array(params[:split_ind])
     angle = np.array(params[split_ind:width_len])*np.pi*2
     width_1 = (np.array(params[width_len:]))
@@ -370,13 +386,13 @@ def vqe(params,pauli_dict,pulse_backend, backend,n_qubit,n_shot, ansatz):
     #print("E for cur_iter: ",sum(expect_values))
     return sum(expect_values)
     
-max_timesteps = 10
+max_timesteps = 100
 callback = MyCustomCallback(max_timesteps=max_timesteps)
 env = DummyVecEnv([lambda: QuantumEnv()])
 # Agente RL
 model = PPO("MlpPolicy", env, verbose=1)
 print("Inizio dell'apprendimento...")
-model.learn(total_timesteps=5, callback=callback)
+model.learn(total_timesteps = 100, callback=callback)
 print("Apprendimento completato.")
 
 plt.plot(callback.timesteps, callback.rewards, marker = "o", linewidth = 1.0, label = "curva di apprendimento")
