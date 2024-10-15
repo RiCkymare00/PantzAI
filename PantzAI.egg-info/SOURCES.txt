@@ -1,0 +1,9 @@
+LICENSE
+README.md
+pyproject.toml
+PantzAI/VQE_2q_FakeManila.py
+PantzAI/__init__.py
+PantzAI.egg-info/PKG-INFO
+PantzAI.egg-info/SOURCES.txt
+PantzAI.egg-info/dependency_links.txt
+PantzAI.egg-info/top_level.txt
