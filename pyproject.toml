@@ -1,6 +1,6 @@
 [project]
 name = "PantzAI"
-version = "0.1"
+version = "1.0.1"
 description = "Implementation of RL techniques for defining pulse-based ansatz in VQE processes."
 readme = "README.md"
 requires-python = ">=3.6"

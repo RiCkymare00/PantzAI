@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: PantzAI
-Version: 0.1
+Version: 1.0.1
 Summary: Implementation of RL techniques for defining pulse-based ansatz in VQE processes.
 Author-email: Riccardo Marega <maregariccardo.rm0@gmail.com>
 Project-URL: homepage, https://github.com/RiCkymare00/PantzAI
