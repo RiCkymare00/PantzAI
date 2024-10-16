@@ -15,3 +15,16 @@ classifiers = [
 [project.urls]
 homepage = "https://github.com/RiCkymare00/PantzAI"
 
+[project.dependencies]
+qiskit-dynamics = "^0.4.2"
+jax = "^0.4.33"
+gym = "^0.26.2"
+stable-baselines3 = "^2.3.2"
+scipy = "^1.9.3"
+qiskit-aer = "^0.13.1"
+matplotlib = "^3.8.2"
+numpy = "^1.23.5"
+shutil = "*"
+os = "*"
+gc = "*"
+
