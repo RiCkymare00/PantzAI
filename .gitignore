@@ -1,0 +1,12 @@
+# Ignora le cartelle nascoste come .git e .ipynb_checkpoints
+.git/
+.ipynb_checkpoints/
+
+# Ignora i file di build
+dist/
+*.egg-info/
+
+# Ignora l'ambiente virtuale (se presente)
+venv/
+env/
+
