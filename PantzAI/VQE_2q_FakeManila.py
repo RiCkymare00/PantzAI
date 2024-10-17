@@ -1,3 +1,7 @@
+import warnings
+warnings.filterwarnings("ignore")
+import os
+os.environ['JAX_JIT_PJIT_API_MERGE'] = '0'
 from qiskit_dynamics import Solver, DynamicsBackend
 from qiskit_dynamics.backend import default_experiment_result_function
 from qiskit_dynamics.array import Array
@@ -26,29 +30,28 @@ from qiskit.algorithms.optimizers import SPSA, SLSQP, COBYLA
 from qiskit.algorithms.minimum_eigensolvers import NumPyMinimumEigensolver
 from qiskit_aer.primitives import Estimator
 import shutil
-import os
-import os
-os.environ['JAX_JIT_PJIT_API_MERGE'] = '0'
 from stable_baselines3.common.callbacks import BaseCallback
 from qiskit.providers.ibmq import IBMQBackend
 from qiskit_ibm_provider import IBMProvider
 import matplotlib.pyplot as plt
 from stable_baselines3.common.evaluation import evaluate_policy
 import gc
+from tqdm import tqdm
+import sys
 
 def ansatzRL(max_timesteps,episodes):
+
     gate_backend =FakeManila()
     gate_backend.configuration().hamiltonian['qub'] = {'0': 2,'1': 2,'2': 2,'3': 2,'4': 2}
     #jax.config.update("jax_enable_x64", True)
     #jax.config.update("jax_platform_name", "cpu")
     #Array.set_default_backend("jax")
     pulse_backend = DynamicsBackend.from_backend(gate_backend, evaluation_mode="sparse")
-    #solver_options = {"method": "jax_odeint", "atol": 1e-6, "rtol": 1e-8}
+    #solver_options = {"method": "jax_odeint", "atol": 1e-1, "rtol": 1e-2}
     #pulse_backend.set_options(solver_options=solver_options)
     pulse_backend.configuration = lambda: gate_backend.configuration()
     #print('jax.devices()',jax.devices())
-    print("Porte logiche supportate dal backend FakeManila:", gate_backend.configuration().basis_gates)
-    
+    print("FakeManila's quantum gates:", gate_backend.configuration().basis_gates)    
     settings.use_pauli_sum_op = False
     
     my_dict = {}
@@ -60,14 +63,19 @@ def ansatzRL(max_timesteps,episodes):
             self.current_timesteps = 0
             self.rewards = []
             self.timesteps = []
-    
+
+        def _on_training_start(self):   
+            self.pbar = tqdm(total=self.max_timesteps, desc="Training", bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} timesteps")
+
         def _on_step(self) -> bool:
             self.current_timesteps += 1
             self.rewards.append(self.locals['rewards'])
             self.timesteps.append(self.num_timesteps)
-            print(f"Current timestep: {self.current_timesteps}")
+            self.pbar.update(1)
+            #print(f"Current timestep: {self.current_timesteps}")
             if self.current_timesteps >= self.max_timesteps:
-                print(f"Max timesteps reached ({self.max_timesteps}). Stopping training.")
+                #print(f"Max timesteps reached ({self.max_timesteps}). Stopping training.")
+                self.pbar.close()
                 return False  # Restituisce False per fermare il training
             return True
     
@@ -123,14 +131,14 @@ def ansatzRL(max_timesteps,episodes):
             (qubit_op, my_dict, problem, REPULSION_ENERGYproblem) = get_qubit_op(dist)
         
             #print('Distanza:', dist)
-            print('Ansatz:', self.ansatz)
+            #print('Ansatz:', self.ansatz)
             vqe_res = minimize(vqe, params, args=(my_dict, pulse_backend, gate_backend, n_qubit, n_shot, self.ansatz),
-                               method=optimizer, constraints=LC, options={'rhobeg':0.1, 'maxiter':50})
+                               method=optimizer, constraints=LC, options={'rhobeg':0.2, 'maxiter':50,'disp':False})
             
             # Calcola la ricompensa
             reward = 5+5*np.log((-(vqe_res.fun + REPULSION_ENERGYproblem))**2)
-            print('reward: ',reward)
-            print('energy:', vqe_res.fun + REPULSION_ENERGYproblem)
+            #print('reward: ',reward)
+            #print('energy:', vqe_res.fun + REPULSION_ENERGYproblem)
     
             # Verifica se l'ambiente è terminato (massimo numero di gate)
             done = len(self.ansatz) >= self.max_gates
@@ -356,7 +364,7 @@ def ansatzRL(max_timesteps,episodes):
         return value*run_pulse_sim(meas_pulse, key, pulse_backend, backend, n_shot)
     
     def vqe(params,pauli_dict,pulse_backend, backend,n_qubit,n_shot, ansatz):
-        print("params in def chemistry in vqe.py: ", params)
+        #print("params in def chemistry in vqe.py: ", params)
         # assert(len(params)%2==0)
         width_len = int(len(params)-1*(n_qubit-1))
         split_ind = int(width_len/2)
@@ -385,9 +393,9 @@ def ansatzRL(max_timesteps,episodes):
     env = DummyVecEnv([lambda: QuantumEnv()])
     # Agente RL
     model = PPO("MlpPolicy", env, verbose=1)
-    print("Inizio dell'apprendimento...")
+    #print("Inizio dell'apprendimento...")
     model.learn(max_timesteps , callback=callback)
-    print("Apprendimento completato.")
+    #print("Apprendimento completato.")
     
     plt.plot(callback.timesteps, callback.rewards, marker = "o", linewidth = 1.0, label = "curva di apprendimento")
     plt.xlabel("timesteps")
@@ -398,8 +406,10 @@ def ansatzRL(max_timesteps,episodes):
     plt.savefig(output_path)
     
     total_score = 0
-    for episode in range(1, episodes+1):
-        print('EPISODIO:',episode)
+    episode_progress_bar = tqdm(range(1, episodes+1), desc="Episodes Progress")
+
+    for episode in episode_progress_bar:
+        #print('EPISODIO:',episode)
         state = env.reset()
         done = False
         score = 0
@@ -407,14 +417,16 @@ def ansatzRL(max_timesteps,episodes):
             env.render()
             action, _ = model.predict(state)
             n_state, reward, done,_= env.step(action)
-            print('stato:',n_state)
+            #print('stato:',n_state)
             state = n_state
             total_score += reward
             score += reward
     
             if done:
                 break
-        print(f'Episode:{episode} Score:{score}')
+        #print(f'Episode:{episode} Score:{score}')
+        episode_progress_bar.set_postfix(score=score)
+
     mean_score = total_score/episodes
     print(f'Mean score:{mean_score}')
     
