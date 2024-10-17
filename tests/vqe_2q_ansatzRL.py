@@ -1,5 +1,7 @@
 import PantzAI
 
-print('First try: ansats up to 10 gates')
-PantzAI.ansatzRL()
+max_timesteps = 500
+episodes = 5
+
+PantzAI.ansatzRL(max_timesteps,episodes)
 print('End of the simulation')

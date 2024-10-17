@@ -36,7 +36,7 @@ import matplotlib.pyplot as plt
 from stable_baselines3.common.evaluation import evaluate_policy
 import gc
 
-def ansatzRL():
+def ansatzRL(max_timesteps,episodes):
     gate_backend =FakeManila()
     gate_backend.configuration().hamiltonian['qub'] = {'0': 2,'1': 2,'2': 2,'3': 2,'4': 2}
     #jax.config.update("jax_enable_x64", True)
@@ -387,7 +387,6 @@ def ansatzRL():
         #print("E for cur_iter: ",sum(expect_values))
         return sum(expect_values)
         
-    max_timesteps = 100
     callback = MyCustomCallback(max_timesteps=max_timesteps)
     env = DummyVecEnv([lambda: QuantumEnv()])
     # Agente RL
@@ -404,7 +403,7 @@ def ansatzRL():
     output_path = 'apprend.png'
     plt.savefig(output_path)
     
-    episodes = 1
+    total_score = 0
     for episode in range(1, episodes+1):
         print('EPISODIO:',episode)
         state = env.reset()
@@ -416,10 +415,14 @@ def ansatzRL():
             n_state, reward, done,_= env.step(action)
             print('stato:',n_state)
             state = n_state
+            total_score += reward
             score += reward
     
             if done:
                 break
         print(f'Episode:{episode} Score:{score}')
+    mean_score = total_score/episodes
+    print(f'Mean score:{mean_score}')
     
+
     env.close()
