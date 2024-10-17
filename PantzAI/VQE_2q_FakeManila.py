@@ -96,7 +96,7 @@ def ansatzRL(max_timesteps,episodes):
             return np.array(obs, dtype=np.int32)
     
         def n_param(self,ansatz): #avrà maggior significato con la complicazione dell'ansatz
-            param = 4
+            param = 7
             return param
     
         def step(self, action):
@@ -163,7 +163,7 @@ def ansatzRL(max_timesteps,episodes):
                     elif gate == 'cx':
                          with pulse.build(backend) as sched2:
                             uchan = pulse.control_channels(0, 1)[0]
-                            pulse.play(cr_pulse(backend, amp[3], angle[3], width[0]), uchan)
+                            pulse.play(cr_pulse(backend, amp[2], angle[2], width[0]), uchan)
                          sched_list.append(sched2)
         
         
