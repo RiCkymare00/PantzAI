@@ -76,7 +76,7 @@ def ansatzRL(max_timesteps,episodes):
             super(QuantumEnv,self).__init__()
             self.available_gates = ['x', 'cx']
             self.ansatz = []
-            self.max_gates = 10
+            self.max_gates = 2
             #spazio delle azioni
             self.action_space = spaces.Discrete(2 * len(self.available_gates))
             #spazio degli stati
@@ -95,14 +95,8 @@ def ansatzRL(max_timesteps,episodes):
             obs += [len(self.available_gates)] * (self.max_gates - len(obs))
             return np.array(obs, dtype=np.int32)
     
-        def n_param(self,ansatz):
-            param = 0
-            i = 0
-            if not ansatz:
-                param = 7
-            for i in range(0,len(ansatz)):
-                if ansatz[i] == 'x' or ansatz[i] == 'cx':
-                    param = param + 7
+        def n_param(self,ansatz): #avrà maggior significato con la complicazione dell'ansatz
+            param = 4
             return param
     
         def step(self, action):
@@ -169,7 +163,7 @@ def ansatzRL(max_timesteps,episodes):
                     elif gate == 'cx':
                          with pulse.build(backend) as sched2:
                             uchan = pulse.control_channels(0, 1)[0]
-                            pulse.play(cr_pulse(backend, amp[0], angle[2], width[0]), uchan)
+                            pulse.play(cr_pulse(backend, amp[3], angle[3], width[0]), uchan)
                          sched_list.append(sched2)
         
         
@@ -392,7 +386,7 @@ def ansatzRL(max_timesteps,episodes):
     # Agente RL
     model = PPO("MlpPolicy", env, verbose=1)
     print("Inizio dell'apprendimento...")
-    model.learn(total_timesteps = 100, callback=callback)
+    model.learn(max_timesteps , callback=callback)
     print("Apprendimento completato.")
     
     plt.plot(callback.timesteps, callback.rewards, marker = "o", linewidth = 1.0, label = "curva di apprendimento")
