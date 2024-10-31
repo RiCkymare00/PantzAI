@@ -72,6 +72,7 @@ def ansatzRL(max_timesteps,episodes):
             self.rewards.append(self.locals['rewards'])
             self.timesteps.append(self.num_timesteps)
             self.pbar.update(1)
+            self.pbar.set_postfix(current_timestep=self.current_timesteps, rewards=self.rewards[-1])
             #print(f"Current timestep: {self.current_timesteps}")
             if self.current_timesteps >= self.max_timesteps:
                 #print(f"Max timesteps reached ({self.max_timesteps}). Stopping training.")
@@ -83,7 +84,7 @@ def ansatzRL(max_timesteps,episodes):
         def __init__(self):
             super(QuantumEnv,self).__init__()
             self.available_gates = ['x', 'cx']
-            self.ansatz = []
+            self.ansatz = ['x']
             self.max_gates = 2
             #spazio delle azioni
             self.action_space = spaces.Discrete(2 * len(self.available_gates))
@@ -92,7 +93,7 @@ def ansatzRL(max_timesteps,episodes):
             self.actions = []
     
         def reset(self):
-            self.ansatz = [] 
+            self.ansatz = ['x'] 
             return self._get_obs()
     
         def _get_obs(self):
@@ -106,7 +107,12 @@ def ansatzRL(max_timesteps,episodes):
         def n_param(self,ansatz): #avrà maggior significato con la complicazione dell'ansatz
             param = 7
             return param
-    
+        
+        def exact_solver(self,qubit_op, problem):
+            sol = NumPyMinimumEigensolver().compute_minimum_eigenvalue(qubit_op)
+            result = problem.interpret(sol)
+            return result
+
         def step(self, action):
             info = {}
             self.actions.append(action)
@@ -129,16 +135,16 @@ def ansatzRL(max_timesteps,episodes):
             params = np.zeros(parameters)
         
             (qubit_op, my_dict, problem, REPULSION_ENERGYproblem) = get_qubit_op(dist)
-        
+            exact_energy = self.exact_solver(qubit_op, problem)
             #print('Distanza:', dist)
-            #print('Ansatz:', self.ansatz)
+            print('Ansatz:', self.ansatz)
             vqe_res = minimize(vqe, params, args=(my_dict, pulse_backend, gate_backend, n_qubit, n_shot, self.ansatz),
-                               method=optimizer, constraints=LC, options={'rhobeg':0.2, 'maxiter':50,'disp':False})
+                               method=optimizer, constraints=LC, options={'rhobeg':0.2, 'maxiter':70,'disp':False})
             
             # Calcola la ricompensa
             reward = 5+5*np.log((-(vqe_res.fun + REPULSION_ENERGYproblem))**2)
-            #print('reward: ',reward)
-            #print('energy:', vqe_res.fun + REPULSION_ENERGYproblem)
+            print('reward: ',reward)
+            print('energy: ', vqe_res.fun + REPULSION_ENERGYproblem, '      exact energy: ', exact_energy.total_energies[0].real)
     
             # Verifica se l'ambiente è terminato (massimo numero di gate)
             done = len(self.ansatz) >= self.max_gates
@@ -339,7 +345,8 @@ def ansatzRL(max_timesteps,episodes):
         start_time_result = time.time()
         counts = job.result().get_counts()
         result_time = time.time() - start_time_result
-        
+        #print('counts:', counts)
+
         # Calcola l'aspettativa
         start_time_expectation = time.time()
         expectation = expectation_value(counts, n_shot, key)
@@ -364,7 +371,7 @@ def ansatzRL(max_timesteps,episodes):
         return value*run_pulse_sim(meas_pulse, key, pulse_backend, backend, n_shot)
     
     def vqe(params,pauli_dict,pulse_backend, backend,n_qubit,n_shot, ansatz):
-        #print("params in def chemistry in vqe.py: ", params)
+        # print("parameters: ", params)
         # assert(len(params)%2==0)
         width_len = int(len(params)-1*(n_qubit-1))
         split_ind = int(width_len/2)
@@ -375,7 +382,7 @@ def ansatzRL(max_timesteps,episodes):
         width_norm = (width_1 - 256) / (1024 - 256)
         width_norm = np.clip(width_norm, 0, 1)
         width = (np.round(width_norm * (num_items - 1)) * 16 + 256).astype(int)
-        amp = amp.tolist()
+        amp = np.clip(amp,0,1).tolist()
         angle = angle.tolist()
         width = width.tolist()
         keys = [key for key in pauli_dict]
@@ -428,7 +435,7 @@ def ansatzRL(max_timesteps,episodes):
         episode_progress_bar.set_postfix(score=score)
 
     mean_score = total_score/episodes
-    print(f'Mean score:{mean_score}')
+    #print(f'Mean score:{mean_score}')
     
 
     env.close()
