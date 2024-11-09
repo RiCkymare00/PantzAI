@@ -10,3 +10,6 @@ dist/
 venv/
 env/
 
+#Ignora file inter processuali
+apprend.png
+grafico_output.png

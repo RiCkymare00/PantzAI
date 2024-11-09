@@ -39,7 +39,7 @@ import gc
 from tqdm import tqdm
 import sys
 
-def HH_ansatzRL(max_timesteps,episodes):
+def LiH_ansatzRL(max_timesteps,episodes):
 
     gate_backend =FakeManila()
     gate_backend.configuration().hamiltonian['qub'] = {'0': 2,'1': 2,'2': 2,'3': 2,'4': 2}
@@ -105,7 +105,7 @@ def HH_ansatzRL(max_timesteps,episodes):
             return np.array(obs, dtype=np.int32)
     
         def n_param(self,ansatz): #avrà maggior significato con la complicazione dell'ansatz
-            param = 7
+            param = 17
             return param
         
         def exact_solver(self,qubit_op, problem):
@@ -125,8 +125,8 @@ def HH_ansatzRL(max_timesteps,episodes):
                     self.ansatz.remove(gate_to_remove)
             
             # Esegui il VQE per calcolare l'energia
-            dist = 0.735
-            n_qubit = 2
+            dist = 1.595
+            n_qubit = 4
             parameters = self.n_param(self.ansatz)
             LC = gen_LC_vqe(parameters)
             n_shot = 1024
@@ -163,66 +163,76 @@ def HH_ansatzRL(max_timesteps,episodes):
             #Restituisci osservazione, ricompensa, stato finito e informazioni aggiuntive
             return self._get_obs(), reward, done, info
     
-        def HE_pulse(backend, amp, angle, width, ansatz):
+        def HE_pulse(backend, amp, angle, width,ansatz):
             with pulse.build(backend) as my_program1:
-                sched_list = []
-                for gate in ansatz:
+              # layer 1
+              sched_list = []
+              for gate in ansatz:
                     if gate == 'x':
                         with pulse.build(backend) as sched1:
-                            qubits = (0, 1)
-                            for i in range(2):
+                            qubits = (0,1,2,3)
+                            for i in range(4):
                                 pulse.play(drag_pulse(backend, amp[i], angle[i]), DriveChannel(qubits[i]))
                         sched_list.append(sched1)
-                
+        
                     elif gate == 'cx':
-                         with pulse.build(backend) as sched2:
+                        with pulse.build(backend) as sched2:
                             uchan = pulse.control_channels(0, 1)[0]
-                            pulse.play(cr_pulse(backend, amp[2], angle[2], width[0]), uchan)
-                         sched_list.append(sched2)
+                            pulse.play(cr_pulse(backend,amp[4], angle[4], width[0]), uchan)
+                        sched_list.append(sched2)
         
         
-                with pulse.build(backend) as my_program:
-                    with pulse.transpiler_settings(initial_layout=[0, 1]):
-                        with pulse.align_sequential():
-                            for sched in sched_list:
-                                pulse.call(sched)
+                        with pulse.build(backend) as sched4:
+                            uchan = pulse.control_channels(1, 2)[0]
+                            pulse.play(cr_pulse(backend, amp[5], angle[5], width[1]), uchan)
+                        sched_list.append(sched4)
         
-            duration_in_cycles = my_program.duration
-            dt = backend.configuration().dt
-            duration_in_ns = duration_in_cycles * dt * 1e9  # conversione in nanosecondi
+                        with pulse.build(backend) as sched6:
+                            uchan = pulse.control_channels(2, 3)[0]
+                            pulse.play(cr_pulse(backend, amp[6],angle[6], width[2]), uchan)
+                        sched_list.append(sched6)  
         
-            '''print(f"Durata totale del programma di impulsi: {duration_in_ns} ns")
-            print('--------------------------------------------------------------------')
-            print(my_program)
-            print('--------------------------------------------------------------------')'''
+              with pulse.build(backend) as my_program:
+                with pulse.transpiler_settings(initial_layout= [0,1,2,3]):
+                  with pulse.align_sequential():
+                      for sched in sched_list:
+                          pulse.call(sched)
+              duration_in_cycles = my_program.duration
+              dt = backend.configuration().dt
+              duration_in_ns = duration_in_cycles * dt * 1e9  # conversione in nanosecondi
+        
+              #print(f"Durata totale del programma di impulsi: {duration_in_ns} ns")
+        
             return my_program
     
     def get_qubit_op(dist):
         # Define Molecule
         ultra_simplified_ala_string = f"""
-        H 0.0 0.0 0.0
+        Li 0.0 0.0 0.0
         H 0.0 0.0 {dist}
         """
         
         driver = PySCFDriver(
             atom=ultra_simplified_ala_string.strip(),
-            basis='sto3g',
+            basis={
+            'Li': 'sto3g',
+            'H': 'sto3g'
+            },
             unit=DistanceUnit.ANGSTROM
         )
         qmolecule = driver.run()
-        num_active_electrons = 2
-        num_active_orbitals = 2
-        as_transformer = ActiveSpaceTransformer(num_active_electrons,num_active_orbitals)
+        
+        #num_active_electrons = 2
+        num_active_orbitals = 3
+        as_transformer = ActiveSpaceTransformer(qmolecule.num_particles,num_active_orbitals)
         problem = as_transformer.transform(qmolecule)
         mapper = ParityMapper(num_particles = problem.num_particles)
+        #mapper = JordanWignerMapper()
         qubit_op = mapper.map(problem.second_q_ops()[0])
-        '''num_active_electrons = 2
-        num_active_orbitals = 2
-        as_transformer = ActiveSpaceTransformer(num_active_electrons,num_active_orbitals)
-        problem = as_transformer.transform(qmolecule)
-        mapper = ParityMapper(num_particles = problem.num_particles)
-        qubit_op = mapper.map(problem.second_q_ops()[0])
-        print(qubit_op)'''
+        #print(problem.nuclear_repulsion_energy)
+            
+        #print(qubit_op)
+        #print(qubit_op)
         for pauli in qubit_op:
             #print(pauli)
             str_info = pauli.__str__()
